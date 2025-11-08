@@ -1,6 +1,8 @@
 import logging
+from cmath import asinh
+
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, MessageHandler, filters, ContextTypes, CommandHandler, CallbackContext
 from .gigachat_client import get_gigachat_response_async
 from .models import Bot, Scenario, Step, UserSession
 from asgiref.sync import sync_to_async
@@ -12,7 +14,7 @@ logging.basicConfig(level=logging.INFO)
 # Обертка для синхронных вызовов ORM
 @sync_to_async
 def get_bot_instance(token):
-    return Bot.objects.filter(token=token).first()
+    return Bot.objects.filter(token=token, is_active=True).first()
 
 @sync_to_async
 def get_scenario(bot_id):
@@ -24,7 +26,7 @@ def get_steps(scenario_id):
 
 @sync_to_async
 def get_step_by_id(step_id, scenario_id):
-    return Step.objects.filter(id=step_id, scenario_id=scenario_id).first()
+    return Step.objects.filter(order=step_id, scenario_id=scenario_id).first()
 
 
 @sync_to_async
@@ -48,12 +50,38 @@ def update_session(user_id, bot_instance, next_step_id):
 def delete_session(user_id, bot_instance):
     UserSession.objects.filter(user_id=user_id, bot=bot_instance).delete()
 
+async def delete_session_handler(update: Update, context: CallbackContext):
+    bot_instance = await get_bot_instance(context.bot.token)
+    await delete_session(
+        user_id=update.message.from_user.id,
+        bot_instance=bot_instance
+    )
+    await update.message.reply_text("👌🏻")
+
+async def help_menu(update: Update, context: CallbackContext):
+    await update.message.reply_text(
+        """Доступные команды:
+        /help - Вызов этой справочной информации"
+        /start - Выводит приветственное сообщение"
+        /clear - Очищает данные сессии пользователя (сброс текущего шага сценария)"""
+    )
+
+
+async def send_welcome_message(update: Update, context: CallbackContext):
+    welcome_message = ("Привет! Я бот Дмитрия, он сделал меня для учебного проекта. "
+                       "Начни диалог и посмотри что я могу")
+    await update.message.reply_text(welcome_message)
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     chat_id = update.message.chat_id
     user_id = update.effective_user.id  # Уникальный ID пользователя Telegram
 
     logging.info(f"{chat_id} Написал боту: {user_message}")
+
+    # Проверяем, что пользователь нажал /start
+
 
     # Находим бот по токену (теперь асинхронно)
     bot_instance = await get_bot_instance(context.bot.token)
@@ -86,15 +114,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Получаем конкретный шаг по ID (через sync_to_async!)
         current_step = await get_step_by_id(current_step_id, scenario.id)
         if not current_step:
-            logging.error(f"{chat_id} Текущий шаг не найден.")
+            logging.error(f"{chat_id} Текущий шаг {current_step} не найден.")
             await update.message.reply_text("Ошибка: шаг не найден.")
+            # В случае ошибки сбрасываем состояние сессии, чтобы избежать зацикливания
+            await delete_session(user_id, bot_instance)
             return
 
     # 4. Формируем промпт и отправляем в GigaChat
     prompt = current_step.prompt.format(user_message=user_message)
     gigachat_response = await get_gigachat_response_async(prompt)
 
-    logging.debug(f"{chat_id} Ответ бота: {gigachat_response}")
+    logging.info(f"{chat_id} Ответ бота: {gigachat_response}")
     await update.message.reply_text(gigachat_response)
 
     # 5. Переходим к следующему шагу
@@ -113,6 +143,10 @@ async def start_bot(token: str):
     """Запускает один Telegram-бот."""
     try:
         application = Application.builder().token(token).build()
+
+        application.add_handler(CommandHandler("help", help_menu))
+        application.add_handler(CommandHandler("start", send_welcome_message))
+        application.add_handler(CommandHandler("clear", delete_session_handler))
 
         await application.initialize()
         await application.updater.initialize()
