@@ -1,28 +1,31 @@
 import logging
-from cmath import asinh
 
-from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes, CommandHandler, CallbackContext
-from .gigachat_client import get_gigachat_response_async
-from .models import Bot, Scenario, Step, UserSession
 from asgiref.sync import sync_to_async
 from django.utils import timezone
+from telegram import Update
+from telegram.ext import Application, MessageHandler, filters, ContextTypes, CommandHandler, CallbackContext
 
+from .gigachat_client import get_gigachat_response_async
+from .models import Bot, Scenario, Step, UserSession
 
 logging.basicConfig(level=logging.INFO)
+
 
 # Обертка для синхронных вызовов ORM
 @sync_to_async
 def get_bot_instance(token):
     return Bot.objects.filter(token=token, is_active=True).first()
 
+
 @sync_to_async
 def get_scenario(bot_id):
     return Scenario.objects.filter(bot_id=bot_id).first()
 
+
 @sync_to_async
 def get_steps(scenario_id):
     return Step.objects.filter(scenario_id=scenario_id).order_by("order")
+
 
 @sync_to_async
 def get_step_by_id(step_id, scenario_id):
@@ -36,6 +39,7 @@ def get_or_create_session(user_id, bot_instance):
         bot=bot_instance
     )
 
+
 @sync_to_async
 def update_session(user_id, bot_instance, next_step_id):
     UserSession.objects.filter(
@@ -43,12 +47,14 @@ def update_session(user_id, bot_instance, next_step_id):
         bot=bot_instance
     ).update(
         current_step_id=next_step_id,
-        last_activity=timezone.now()  # timezone.now() — потокобезопасно
+        last_activity=timezone.now()
     )
+
 
 @sync_to_async
 def delete_session(user_id, bot_instance):
     UserSession.objects.filter(user_id=user_id, bot=bot_instance).delete()
+
 
 async def delete_session_handler(update: Update, context: CallbackContext):
     bot_instance = await get_bot_instance(context.bot.token)
@@ -57,6 +63,7 @@ async def delete_session_handler(update: Update, context: CallbackContext):
         bot_instance=bot_instance
     )
     await update.message.reply_text("👌🏻")
+
 
 async def help_menu(update: Update, context: CallbackContext):
     await update.message.reply_text(
@@ -68,7 +75,7 @@ async def help_menu(update: Update, context: CallbackContext):
 
 
 async def send_welcome_message(update: Update, context: CallbackContext):
-    welcome_message = ("Привет! Я бот Дмитрия, он сделал меня для учебного проекта. "
+    welcome_message = ("Привет! Я бот из учебного проекта."
                        "Начни диалог и посмотри что я могу")
     await update.message.reply_text(welcome_message)
 
@@ -80,17 +87,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logging.info(f"{chat_id} Написал боту: {user_message}")
 
-    # Проверяем, что пользователь нажал /start
-
-
-    # Находим бот по токену (теперь асинхронно)
+    # Находим бот по токену
     bot_instance = await get_bot_instance(context.bot.token)
     if not bot_instance:
         logging.error(f"{chat_id} Ошибка: Бот не найден.")
         await update.message.reply_text("Бот не найден.")
         return
 
-    # Берём первый сценарий и первый шаг (асинхронно)
+    # Берём первый сценарий и первый шаг
     scenario = await get_scenario(bot_instance.id)
     if not scenario:
         logging.error(f"{chat_id} Ошибка: Нет настроенных сценариев.")
@@ -120,7 +124,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await delete_session(user_id, bot_instance)
             return
 
-    # 4. Формируем промпт и отправляем в GigaChat
+    # 4. Формируем промт и отправляем в GigaChat
     prompt = current_step.prompt.format(user_message=user_message)
     gigachat_response = await get_gigachat_response_async(prompt)
 
@@ -136,7 +140,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Сценарий завершён — удаляем сессию
         await delete_session(user_id, bot_instance)
         await update.message.reply_text("Хотите узнать гороскоп кого-то еще?.")
-
 
 
 async def start_bot(token: str):

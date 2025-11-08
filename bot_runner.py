@@ -4,18 +4,19 @@
 Запускает всех активных ботов, зарегистрированных в системе.
 """
 
-import os
-import django
-import logging
 import asyncio
-from telegram.ext import Application
-from asgiref.sync import sync_to_async
+import logging
+import os
 from asyncio.exceptions import CancelledError
+
+import django
+from asgiref.sync import sync_to_async
 
 # Настройка Django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'bot_builder.settings')
 django.setup()
 
+# Эти импорты должны быть выполнены только после определения настроек Django
 from api.models import Bot
 from api.telegram_bot import start_bot
 
@@ -24,6 +25,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
 
 @sync_to_async
 def get_active_bots():

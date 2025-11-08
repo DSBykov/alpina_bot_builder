@@ -11,10 +11,12 @@ class BotModelViewSet(viewsets.ModelViewSet):
     http_method_names = ['post', 'get']
     serializer_class = BotSerializer
 
+
 class ScenarioViewSet(viewsets.ModelViewSet):
     queryset = Scenario.objects.all()
     http_method_names = ['post', 'get']
     serializer_class = ScenarioSerializer
+
 
 class StepViewSet(viewsets.ModelViewSet):
     queryset = Step.objects.all()
